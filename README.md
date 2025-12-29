@@ -181,6 +181,23 @@ await accessHandle.flush();
 await accessHandle.close();
 ```
 
+Synchronous read/write example (use in worker contexts to avoid blocking the main thread):
+
+```javascript
+const accessHandle = await fileHandle.createSyncAccessHandle();
+
+// Write synchronously
+const writeBuf = new TextEncoder().encode('Hello');
+accessHandle.write(writeBuf, { at: 0 });
+
+// Read synchronously
+const readBuf = new Uint8Array(5);
+accessHandle.read(readBuf, { at: 0 });
+console.log(new TextDecoder().decode(readBuf)); // 'Hello'
+
+await accessHandle.close();
+```
+
 ### FileSystemWritableFileStream
 
 A writable stream for file operations.
@@ -315,9 +332,54 @@ By default, files are stored in `~/.node-opfs` (in the user's home directory). Y
 
 This library implements the same API as the browser's File System Access API (OPFS), making it easy to share code between Node.js and browser environments. Simply swap the import when running in different environments.
 
+## Worker Threads (Node)
+
+Use Node's `worker_threads` for best-practice synchronous I/O (mirrors browser Workers). Minimal ESM example:
+
+```javascript
+// main.mjs
+import { Worker } from 'node:worker_threads';
+
+const worker = new Worker(new URL('./opfs-worker.mjs', import.meta.url), { type: 'module' });
+
+worker.on('message', (msg) => {
+  console.log('Worker says:', msg);
+});
+
+worker.on('error', (err) => {
+  console.error('Worker error:', err);
+});
+
+worker.on('exit', (code) => {
+  console.log('Worker exited with code', code);
+});
+```
+
+```javascript
+// opfs-worker.mjs
+import { parentPort } from 'node:worker_threads';
+import { navigator } from 'node-opfs';
+
+const root = await navigator.storage.getDirectory();
+const fileHandle = await root.getFileHandle('worker-sync.txt', { create: true });
+const accessHandle = await fileHandle.createSyncAccessHandle();
+
+// Write synchronously
+const writeBuf = new TextEncoder().encode('Hello from worker');
+accessHandle.write(writeBuf, { at: 0 });
+
+// Read synchronously
+const readBuf = new Uint8Array(writeBuf.length);
+accessHandle.read(readBuf, { at: 0 });
+
+await accessHandle.close();
+
+parentPort.postMessage(new TextDecoder().decode(readBuf));
+```
+
 ## Known Limitations
 
-- **FileSystemSyncAccessHandle**: The synchronous `read()` and `write()` methods are not fully implemented. These methods are primarily used in Web Workers in browsers. Node.js is inherently async-friendly, so the async methods (`FileSystemWritableFileStream`) are recommended instead.
+- **FileSystemSyncAccessHandle**: The synchronous `read()` and `write()` methods are implemented via Node's `fs.readSync`/`fs.writeSync` on the file descriptor and will block the calling thread. For heavy I/O, prefer using them inside `worker_threads` (similar to browser Workers). Async methods (`FileSystemWritableFileStream`) remain the recommended default for non-worker contexts.
 
 ## License
 

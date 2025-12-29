@@ -334,6 +334,31 @@ test('createWritable without keepExistingData truncates file', async () => {
   assert.strictEqual(text, 'New');
 });
 
+test('FileSystemSyncAccessHandle read/write works synchronously', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-handle-test.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write synchronously
+  const writeBuf = new TextEncoder().encode('SYNC');
+  const bytesWritten = accessHandle.write(writeBuf);
+  assert.strictEqual(bytesWritten, writeBuf.length);
+
+  // Read synchronously
+  const readBuf = new Uint8Array(4);
+  const bytesRead = accessHandle.read(readBuf, { at: 0 });
+  assert.strictEqual(bytesRead, 4);
+  assert.strictEqual(new TextDecoder().decode(readBuf), 'SYNC');
+
+  // Truncate and size
+  await accessHandle.truncate(2);
+  const size = await accessHandle.getSize();
+  assert.strictEqual(size, 2);
+
+  await accessHandle.flush();
+  await accessHandle.close();
+});
+
 // Cleanup after all tests
 test('cleanup test directory', async () => {
   try {

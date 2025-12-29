@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import { FileSystemHandle } from './FileSystemHandle.js';
 import { FileSystemWritableFileStream } from './FileSystemWritableFileStream.js';
 
@@ -75,13 +76,12 @@ export class FileSystemSyncAccessHandle {
     if (this._closed) {
       throw new Error('Access handle is closed');
     }
-
-    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
+    const buf = this._toMutableBuffer(buffer);
     const position = options?.at ?? null;
     
-    // Note: This is not truly synchronous but we're in Node.js
-    // In a real implementation, we'd need to use fs.readSync with a file descriptor
-    throw new Error('Synchronous operations not fully supported in this context');
+    // Perform a synchronous read into the provided buffer
+    const bytesRead = fsSync.readSync(this._fd.fd, buf, 0, buf.length, position);
+    return bytesRead;
   }
 
   /**
@@ -91,12 +91,12 @@ export class FileSystemSyncAccessHandle {
     if (this._closed) {
       throw new Error('Access handle is closed');
     }
-
-    const buf = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer as ArrayBuffer);
+    const buf = this._toImmutableBuffer(buffer);
     const position = options?.at ?? null;
     
-    // Note: This is not truly synchronous but we're in Node.js
-    throw new Error('Synchronous operations not fully supported in this context');
+    // Perform a synchronous write from the provided buffer
+    const bytesWritten = fsSync.writeSync(this._fd.fd, buf, 0, buf.length, position);
+    return bytesWritten;
   }
 
   /**
@@ -139,5 +139,21 @@ export class FileSystemSyncAccessHandle {
     }
     await this._fd.close();
     this._closed = true;
+  }
+
+  private _toMutableBuffer(input: ArrayBuffer | ArrayBufferView | Buffer): Buffer {
+    if (Buffer.isBuffer(input)) return input;
+    if (ArrayBuffer.isView(input)) {
+      return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
+    }
+    if (input instanceof ArrayBuffer) {
+      return Buffer.from(input);
+    }
+    throw new Error('Unsupported buffer type');
+  }
+
+  private _toImmutableBuffer(input: ArrayBuffer | ArrayBufferView | Buffer): Buffer {
+    // For writes, the same conversion works; name indicates intent
+    return this._toMutableBuffer(input);
   }
 }
