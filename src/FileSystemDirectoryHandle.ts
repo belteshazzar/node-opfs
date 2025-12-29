@@ -182,13 +182,3 @@ export interface FileSystemGetDirectoryOptions {
 export interface FileSystemRemoveOptions {
   recursive?: boolean;
 }
-
-/**
- * Polyfill for DOMException if not available
- */
-class DOMException extends Error {
-  constructor(message: string, name: string) {
-    super(message);
-    this.name = name;
-  }
-}

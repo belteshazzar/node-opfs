@@ -315,6 +315,10 @@ By default, files are stored in `~/.node-opfs` (in the user's home directory). Y
 
 This library implements the same API as the browser's File System Access API (OPFS), making it easy to share code between Node.js and browser environments. Simply swap the import when running in different environments.
 
+## Known Limitations
+
+- **FileSystemSyncAccessHandle**: The synchronous `read()` and `write()` methods are not fully implemented. These methods are primarily used in Web Workers in browsers. Node.js is inherently async-friendly, so the async methods (`FileSystemWritableFileStream`) are recommended instead.
+
 ## License
 
 MIT
