@@ -45,12 +45,29 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
             return new FileSystemDirectoryHandle(name, dirPath);
         }
         catch (error) {
-            if (error.code === 'ENOENT' && create) {
-                // Create the directory if it doesn't exist
-                await fs.mkdir(dirPath, { recursive: false });
+            if (create) {
+                try {
+                    // Create the directory if it doesn't exist
+                    await fs.mkdir(dirPath, { recursive: false });
+                }
+                catch (mkdirError) {
+                    // If another caller created it first, treat it as success
+                    if (mkdirError.code === 'EEXIST') {
+                        const stats = await fs.stat(dirPath);
+                        if (!stats.isDirectory()) {
+                            throw new TypeError(`'${name}' is not a directory`);
+                        }
+                    }
+                    else {
+                        throw mkdirError;
+                    }
+                }
                 return new FileSystemDirectoryHandle(name, dirPath);
             }
-            throw new DOMException(`Directory '${name}' not found`, 'NotFoundError');
+            if (error.code === 'ENOENT') {
+                throw new DOMException(`Directory '${name}' not found`, 'NotFoundError');
+            }
+            throw error;
         }
     }
     /**

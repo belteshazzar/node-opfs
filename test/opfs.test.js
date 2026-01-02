@@ -138,6 +138,16 @@ test('FileSystemDirectoryHandle.getDirectoryHandle() creates and retrieves direc
   assert.strictEqual(dirHandle2.name, 'subdir');
 });
 
+test('getDirectoryHandle with create:true succeeds when directory exists', async () => {
+  const root = await storage.getDirectory();
+
+  await root.getDirectoryHandle('idempotent-dir', { create: true });
+  const handle = await root.getDirectoryHandle('idempotent-dir', { create: true });
+
+  assert.strictEqual(handle.kind, 'directory');
+  assert.strictEqual(handle.name, 'idempotent-dir');
+});
+
 test('FileSystemDirectoryHandle.removeEntry() removes files', async () => {
   const root = await storage.getDirectory();
   const fileHandle = await root.getFileHandle('to-remove.txt', { create: true });
