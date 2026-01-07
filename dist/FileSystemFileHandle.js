@@ -80,39 +80,39 @@ export class FileSystemSyncAccessHandle {
     /**
      * Truncate the file to the specified size
      */
-    async truncate(newSize) {
+    truncate(newSize) {
         if (this._closed) {
             throw new Error('Access handle is closed');
         }
-        await this._fd.truncate(newSize);
+        fsSync.ftruncateSync(this._fd.fd, newSize);
     }
     /**
      * Get the size of the file
      */
-    async getSize() {
+    getSize() {
         if (this._closed) {
             throw new Error('Access handle is closed');
         }
-        const stats = await this._fd.stat();
+        const stats = fsSync.fstatSync(this._fd.fd);
         return stats.size;
     }
     /**
      * Flush any pending writes
      */
-    async flush() {
+    flush() {
         if (this._closed) {
             throw new Error('Access handle is closed');
         }
-        await this._fd.sync();
+        fsSync.fsyncSync(this._fd.fd);
     }
     /**
      * Close the access handle
      */
-    async close() {
+    close() {
         if (this._closed) {
             return;
         }
-        await this._fd.close();
+        fsSync.closeSync(this._fd.fd);
         this._closed = true;
     }
     _toMutableBuffer(input) {

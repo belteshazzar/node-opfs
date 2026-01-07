@@ -48,19 +48,19 @@ export declare class FileSystemSyncAccessHandle {
     /**
      * Truncate the file to the specified size
      */
-    truncate(newSize: number): Promise<void>;
+    truncate(newSize: number): void;
     /**
      * Get the size of the file
      */
-    getSize(): Promise<number>;
+    getSize(): number;
     /**
      * Flush any pending writes
      */
-    flush(): Promise<void>;
+    flush(): void;
     /**
      * Close the access handle
      */
-    close(): Promise<void>;
+    close(): void;
     private _toMutableBuffer;
     private _toImmutableBuffer;
 }
