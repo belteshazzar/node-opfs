@@ -60,7 +60,7 @@ export declare class FileSystemSyncAccessHandle {
     /**
      * Close the access handle
      */
-    close(): void;
+    close(): Promise<void>;
     private _toMutableBuffer;
     private _toImmutableBuffer;
 }

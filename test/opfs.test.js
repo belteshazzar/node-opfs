@@ -361,11 +361,261 @@ test('FileSystemSyncAccessHandle read/write works synchronously', async () => {
   assert.strictEqual(new TextDecoder().decode(readBuf), 'SYNC');
 
   // Truncate and size
-  await accessHandle.truncate(2);
-  const size = await accessHandle.getSize();
+  accessHandle.truncate(2);
+  const size = accessHandle.getSize();
   assert.strictEqual(size, 2);
 
-  await accessHandle.flush();
+  accessHandle.flush();
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle write with position', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-write-position.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write initial data
+  const buf1 = new TextEncoder().encode('0123456789');
+  accessHandle.write(buf1);
+
+  // Write at a specific position
+  const buf2 = new TextEncoder().encode('XXXXX');
+  const bytesWritten = accessHandle.write(buf2, { at: 3 });
+  assert.strictEqual(bytesWritten, 5);
+
+  // Read back and verify
+  const readBuf = new Uint8Array(10);
+  accessHandle.read(readBuf, { at: 0 });
+  const text = new TextDecoder().decode(readBuf);
+  assert.strictEqual(text, '012XXXXX89');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle read with position', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-read-position.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write data
+  const writeBuf = new TextEncoder().encode('Hello, World!');
+  accessHandle.write(writeBuf);
+
+  // Read from specific position
+  const readBuf = new Uint8Array(5);
+  const bytesRead = accessHandle.read(readBuf, { at: 7 });
+  assert.strictEqual(bytesRead, 5);
+  assert.strictEqual(new TextDecoder().decode(readBuf), 'World');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle read beyond file size', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-read-beyond.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write small amount of data
+  const writeBuf = new TextEncoder().encode('Hi');
+  accessHandle.write(writeBuf);
+
+  // Try to read more than available
+  const readBuf = new Uint8Array(10);
+  const bytesRead = accessHandle.read(readBuf, { at: 0 });
+  assert.strictEqual(bytesRead, 2); // Only 2 bytes available
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle truncate expands file', async () => {
+  const root = await storage.getDirectory();
+  const filename = 'sync-truncate-expand-' + Date.now() + '.txt';
+  const fileHandle = await root.getFileHandle(filename, { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write some data at position 0
+  const writeBuf = new TextEncoder().encode('Test');
+  accessHandle.write(writeBuf, { at: 0 });
+  assert.strictEqual(accessHandle.getSize(), 4);
+
+  // Expand file
+  accessHandle.truncate(10);
+  assert.strictEqual(accessHandle.getSize(), 10);
+
+  // Verify expanded region is zeros
+  const readBuf = new Uint8Array(6);
+  accessHandle.read(readBuf, { at: 4 });
+  assert.deepStrictEqual(readBuf, new Uint8Array([0, 0, 0, 0, 0, 0]));
+
+  await accessHandle.close();
+  await root.removeEntry(filename);
+});
+
+test('FileSystemSyncAccessHandle truncate shrinks file', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-truncate-shrink.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write data
+  const writeBuf = new TextEncoder().encode('HelloWorld');
+  accessHandle.write(writeBuf);
+  assert.strictEqual(accessHandle.getSize(), 10);
+
+  // Shrink file
+  accessHandle.truncate(5);
+  assert.strictEqual(accessHandle.getSize(), 5);
+
+  // Verify content
+  const readBuf = new Uint8Array(5);
+  accessHandle.read(readBuf, { at: 0 });
+  assert.strictEqual(new TextDecoder().decode(readBuf), 'Hello');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle flush persists data', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-flush.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write and flush
+  const writeBuf = new TextEncoder().encode('Flushed data');
+  accessHandle.write(writeBuf);
+  accessHandle.flush();
+
+  // Close and reopen to verify persistence
+  await accessHandle.close();
+
+  const file = await fileHandle.getFile();
+  const text = await file.text();
+  assert.strictEqual(text, 'Flushed data');
+});
+
+test('FileSystemSyncAccessHandle write with ArrayBuffer', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-arraybuffer.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Create ArrayBuffer
+  const arrayBuffer = new ArrayBuffer(8);
+  const view = new Uint8Array(arrayBuffer);
+  view.set([65, 66, 67, 68, 69, 70, 71, 72]); // "ABCDEFGH"
+
+  // Write ArrayBuffer
+  const bytesWritten = accessHandle.write(arrayBuffer);
+  assert.strictEqual(bytesWritten, 8);
+
+  // Read back
+  const readBuf = new Uint8Array(8);
+  accessHandle.read(readBuf, { at: 0 });
+  assert.strictEqual(new TextDecoder().decode(readBuf), 'ABCDEFGH');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle read into ArrayBuffer view', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-read-view.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write data
+  const writeBuf = new TextEncoder().encode('1234567890');
+  accessHandle.write(writeBuf);
+
+  // Read into a view of an ArrayBuffer
+  const arrayBuffer = new ArrayBuffer(10);
+  const view = new Uint8Array(arrayBuffer, 2, 5); // Offset 2, length 5
+  const bytesRead = accessHandle.read(view, { at: 3 });
+  assert.strictEqual(bytesRead, 5);
+
+  // Check the specific view got the data
+  assert.strictEqual(new TextDecoder().decode(view), '45678');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle throws when closed', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-closed.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Close the handle
+  await accessHandle.close();
+
+  // All operations should throw
+  assert.throws(() => {
+    accessHandle.write(new Uint8Array([1, 2, 3]));
+  }, /closed/);
+
+  assert.throws(() => {
+    accessHandle.read(new Uint8Array(10));
+  }, /closed/);
+
+  assert.throws(() => {
+    accessHandle.truncate(5);
+  }, /closed/);
+
+  assert.throws(() => {
+    accessHandle.getSize();
+  }, /closed/);
+
+  assert.throws(() => {
+    accessHandle.flush();
+  }, /closed/);
+});
+
+test('FileSystemSyncAccessHandle close is idempotent', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-close-idempotent.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Multiple closes should not throw
+  await accessHandle.close();
+  await accessHandle.close();
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle write without position uses current position', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-write-no-position.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // First write starts at position 0
+  const buf1 = new TextEncoder().encode('First ');
+  accessHandle.write(buf1);
+  
+  // Second write without position continues from current position (after first write)
+  const buf2 = new TextEncoder().encode('Second');
+  accessHandle.write(buf2);
+
+  // Read back - data should be sequential
+  const size = accessHandle.getSize();
+  const readBuf = new Uint8Array(size);
+  accessHandle.read(readBuf, { at: 0 });
+  assert.strictEqual(new TextDecoder().decode(readBuf), 'First Second');
+
+  await accessHandle.close();
+});
+
+test('FileSystemSyncAccessHandle read without position uses current position', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-read-no-position.txt', { create: true });
+  const accessHandle = await fileHandle.createSyncAccessHandle();
+
+  // Write data
+  const writeBuf = new TextEncoder().encode('ABCDEFGHIJ');
+  accessHandle.write(writeBuf, { at: 0 });
+
+  // Sequential reads without position use current file position (advances after each read)
+  const buf1 = new Uint8Array(3);
+  const buf2 = new Uint8Array(3);
+  
+  accessHandle.read(buf1); // Reads from current position (0)
+  accessHandle.read(buf2); // Reads from current position (3, after first read)
+
+  assert.strictEqual(new TextDecoder().decode(buf1), 'ABC');
+  assert.strictEqual(new TextDecoder().decode(buf2), 'DEF');
+
   await accessHandle.close();
 });
 

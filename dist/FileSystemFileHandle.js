@@ -108,11 +108,17 @@ export class FileSystemSyncAccessHandle {
     /**
      * Close the access handle
      */
-    close() {
+    async close() {
         if (this._closed) {
             return;
         }
-        fsSync.closeSync(this._fd.fd);
+        try {
+            await this._fd.close();
+        }
+        catch (error) {
+            // Ignore if already closed
+        }
+        this._fd = null;
         this._closed = true;
     }
     _toMutableBuffer(input) {
