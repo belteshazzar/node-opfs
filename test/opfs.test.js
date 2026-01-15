@@ -50,6 +50,33 @@ test('FileSystemDirectoryHandle.getFileHandle() throws when file does not exist'
   );
 });
 
+test('FileSystemDirectoryHandle.getFileHandle() and getDirectoryHandle() reject paths with separators', async () => {
+  const root = await storage.getDirectory();
+  
+  // Create a subdirectory and file for testing
+  const subdir = await root.getDirectoryHandle('subdir', { create: true });
+  const fileHandle = await subdir.getFileHandle('file.txt', { create: true });
+  
+  // Test getFileHandle rejects paths with forward slashes
+  await assert.rejects(
+    async () => await root.getFileHandle('subdir/file.txt'),
+    { name: 'TypeError' }
+  );
+  
+  // Test getDirectoryHandle rejects paths with forward slashes
+  await assert.rejects(
+    async () => await root.getDirectoryHandle('subdir/nested'),
+    { name: 'TypeError' }
+  );
+  
+  // Verify that direct access still works
+  const directSubdir = await root.getDirectoryHandle('subdir');
+  assert.strictEqual(directSubdir.name, 'subdir');
+  
+  const directFile = await directSubdir.getFileHandle('file.txt');
+  assert.strictEqual(directFile.name, 'file.txt');
+});
+
 test('FileSystemFileHandle.createWritable() and write/close', async () => {
   const root = await storage.getDirectory();
   const fileHandle = await root.getFileHandle('write-test.txt', { create: true });

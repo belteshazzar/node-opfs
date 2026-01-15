@@ -15,6 +15,10 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
    * Returns a file handle for a file in the directory
    */
   async getFileHandle(name: string, options?: FileSystemGetFileOptions): Promise<FileSystemFileHandle> {
+    // Only allow direct children (no path separators)
+    if (name.includes(path.sep) || name.includes('/')) {
+      throw new TypeError('Name is invalid');
+    }
     const filePath = path.join(this._path, name);
     const create = options?.create ?? false;
 
@@ -38,6 +42,10 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
    * Returns a directory handle for a subdirectory
    */
   async getDirectoryHandle(name: string, options?: FileSystemGetDirectoryOptions): Promise<FileSystemDirectoryHandle> {
+    // Only allow direct children (no path separators)
+    if (name.includes(path.sep) || name.includes('/')) {
+      throw new TypeError('Name is invalid');
+    }
     const dirPath = path.join(this._path, name);
     const create = options?.create ?? false;
 
