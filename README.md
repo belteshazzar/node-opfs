@@ -383,7 +383,7 @@ parentPort.postMessage(new TextDecoder().decode(readBuf));
 
 ## License
 
-MIT
+BSD 2-Clause License
 
 ## Contributing
 
