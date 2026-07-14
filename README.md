@@ -59,6 +59,74 @@ const customStorage = new StorageManager('/path/to/custom/directory');
 const root = await customStorage.getDirectory();
 ```
 
+#### `estimate()`
+
+Get an estimate of storage usage and quota, mirroring `navigator.storage.estimate()`. `usage` is the actual on-disk byte total under the storage root; `quota` is `usage` plus the remaining free space on the underlying filesystem.
+
+```javascript
+const { usage, quota } = await storage.estimate();
+console.log(`Using ${usage} of ${quota} bytes`);
+```
+
+#### `persist()` / `persisted()`
+
+Node has no storage-eviction-under-pressure concept, so storage here is always effectively persisted; both always resolve `true`.
+
+```javascript
+await storage.persist();     // true
+await storage.persisted();   // true
+```
+
+### FileSystemHandle
+
+Shared base class for `FileSystemFileHandle` and `FileSystemDirectoryHandle`.
+
+##### `move(newName)` / `move(destinationDirectory)` / `move(destinationDirectory, newName)`
+
+Move and/or rename the entry, updating the handle in place to keep pointing at it.
+
+```javascript
+// Rename in place
+await fileHandle.move('renamed.txt');
+
+// Move into another directory, keeping the same name
+await fileHandle.move(destinationDirHandle);
+
+// Move into another directory with a new name
+await fileHandle.move(destinationDirHandle, 'renamed.txt');
+
+console.log(fileHandle.name); // reflects the new name
+```
+
+Works on both file and directory handles. Rejects with `NoModificationAllowedError` if the file currently has an open `FileSystemWritableFileStream` or `FileSystemSyncAccessHandle`.
+
+##### `remove(options?)`
+
+Remove the entry the handle refers to, without needing the parent directory handle.
+
+```javascript
+await fileHandle.remove();
+await dirHandle.remove({ recursive: true });
+```
+
+##### `isSameEntry(other)`
+
+Check whether two handles refer to the same underlying entry.
+
+```javascript
+const same = await handleA.isSameEntry(handleB);
+```
+
+##### `queryPermission(descriptor?)` / `requestPermission(descriptor?)`
+
+Check or request permission for the handle. Resolves to `'granted'`, `'denied'`, or `'prompt'`.
+
+```javascript
+const state = await fileHandle.queryPermission({ mode: 'readwrite' });
+```
+
+> **Note:** real OPFS handles (from `navigator.storage.getDirectory()`) are never permission-gated — they always resolve `'granted'`, since origin-private storage isn't user-mediated the way picker-based File System Access API handles are. This implementation instead checks actual filesystem readability (`fs.access(path, R_OK)`) and ignores the requested `mode` entirely, so it can return `'denied'` in situations a browser never would (e.g. a file the current OS user can't read), and won't distinguish a read-only file when `mode: 'readwrite'` is requested. Code written against real OPFS should never need to branch on `'denied'`/`'prompt'` for these handles at all; treat this implementation's version as a best-effort filesystem-readability check, not a faithful permission model.
+
 ### FileSystemDirectoryHandle
 
 Represents a directory in the file system.
@@ -198,6 +266,15 @@ console.log(new TextDecoder().decode(readBuf)); // 'Hello'
 await accessHandle.close();
 ```
 
+> **Note:** `at` is optional, matching real OPFS: each access handle has its own file position cursor, starting at `0`. Omitting `at` reads/writes from the cursor and advances it by the amount transferred; passing `at` explicitly reads/writes there instead, but *also* moves the cursor to `at + amount transferred` — so a positioned call still affects where the next unpositioned call picks up, exactly like a real browser. `truncate()` clamps the cursor down if it now exceeds the new file size.
+
+```javascript
+// The cursor carries across calls, positioned or not.
+accessHandle.write(writeBuf);                  // writes at the cursor (starts at 0), cursor now == writeBuf.length
+accessHandle.write(otherBuf, { at: 0 });        // overwrites from the start, cursor now == otherBuf.length
+accessHandle.write(moreBuf);                    // continues right after that positioned write, not from wherever it was before
+```
+
 ### FileSystemWritableFileStream
 
 A writable stream for file operations.
@@ -242,6 +319,8 @@ Truncate the file to the specified size.
 ```javascript
 await writable.truncate(100);
 ```
+
+> **Note:** matching real OPFS, truncating to a size *smaller* than the stream's current write position clamps that position down to the new size, so a subsequent unpositioned `write()` continues from the new end of file rather than from beyond it. Truncating to a size *equal to or larger* than the current file never clamps the position, even if it's already out of bounds from an earlier `seek()` — this asymmetry matches the spec exactly, not just "always clamp."
 
 ##### `close()`
 
@@ -328,6 +407,27 @@ const fileHandle = await root.getFileHandle('test.txt', { create: true });
 
 By default, files are stored in `~/.node-opfs` (in the user's home directory). You can change this by creating a custom `StorageManager` instance with a different base directory.
 
+### There is no per-origin isolation
+
+Real browser OPFS is strictly namespaced per origin — two unrelated sites can never see or write each other's private storage; the browser enforces that boundary for you. Node has no equivalent concept of "origin," so this library can't replicate that isolation:
+
+- Every app that uses the default `navigator.storage`/`storage` singleton without configuring a custom `baseDir` shares the **same** `~/.node-opfs` directory.
+- Two unrelated Node processes/apps run by the same OS user will silently share — and can overwrite or delete — each other's files if they both use the default location.
+- There's no way to detect or prevent this collision from inside the library; it can only happen if you opt into it by not configuring a base directory.
+
+**Recommendation:** any real application should construct its own `StorageManager` with an app-specific `baseDir` (e.g. `new StorageManager(path.join(os.homedir(), '.my-app', 'opfs'))`) rather than relying on the shared default, exactly the way a browser's per-origin storage would be scoped to your site alone:
+
+```javascript
+import { StorageManager } from 'node-opfs';
+import * as path from 'path';
+import * as os from 'os';
+
+const storage = new StorageManager(path.join(os.homedir(), '.my-app', 'opfs'));
+const root = await storage.getDirectory();
+```
+
+The default `~/.node-opfs` location is best treated as a convenience for quick scripts and testing, not as something multiple independent applications should share.
+
 ## Browser Compatibility
 
 This library implements the same API as the browser's File System Access API (OPFS), making it easy to share code between Node.js and browser environments. Simply swap the import when running in different environments.
@@ -380,6 +480,8 @@ parentPort.postMessage(new TextDecoder().decode(readBuf));
 ## Known Limitations
 
 - **FileSystemSyncAccessHandle**: The synchronous `read()` and `write()` methods are implemented via Node's `fs.readSync`/`fs.writeSync` on the file descriptor and will block the calling thread. For heavy I/O, prefer using them inside `worker_threads` (similar to browser Workers). Async methods (`FileSystemWritableFileStream`) remain the recommended default for non-worker contexts.
+- **No per-origin isolation**: unlike real OPFS, this library has no concept of "origin" — apps that don't configure their own `baseDir` share the same default storage location and can silently clobber each other's files. See [There is no per-origin isolation](#there-is-no-per-origin-isolation).
+- **`queryPermission`/`requestPermission` don't match real OPFS semantics**: real OPFS handles are never permission-gated (always `'granted'`); this implementation checks actual filesystem readability instead and can return `'denied'`, which a browser never would for these handles. See the note under [`queryPermission(descriptor?)` / `requestPermission(descriptor?)`](#querypermissiondescriptor--requestpermissiondescriptor).
 
 ## License
 

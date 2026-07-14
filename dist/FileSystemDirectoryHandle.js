@@ -2,6 +2,9 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import { FileSystemHandle } from './FileSystemHandle.js';
 import { FileSystemFileHandle } from './FileSystemFileHandle.js';
+import { isSwapFileName } from './swapFile.js';
+import { assertValidName } from './validateName.js';
+import { removeFileSystemEntry } from './removeHelper.js';
 /**
  * Represents a directory handle
  */
@@ -13,18 +16,13 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
      * Returns a file handle for a file in the directory
      */
     async getFileHandle(name, options) {
-        // Only allow direct children (no path separators)
-        if (name.includes(path.sep) || name.includes('/')) {
-            throw new TypeError('Name is invalid');
-        }
+        // Only allow direct children (no path separators, no "." / "..")
+        assertValidName(name);
         const filePath = path.join(this._path, name);
         const create = options?.create ?? false;
+        let stats;
         try {
-            const stats = await fs.stat(filePath);
-            if (!stats.isFile()) {
-                throw new TypeError(`'${name}' is not a file`);
-            }
-            return new FileSystemFileHandle(name, filePath);
+            stats = await fs.stat(filePath);
         }
         catch (error) {
             if (error.code === 'ENOENT' && create) {
@@ -34,74 +32,68 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
             }
             throw new DOMException(`File '${name}' not found`, 'NotFoundError');
         }
+        // Checked outside the try/catch above so a wrong-kind entry reports
+        // TypeMismatchError instead of being swallowed by the ENOENT handling
+        // and reported as NotFoundError.
+        if (!stats.isFile()) {
+            throw new DOMException(`'${name}' is not a file`, 'TypeMismatchError');
+        }
+        return new FileSystemFileHandle(name, filePath);
     }
     /**
      * Returns a directory handle for a subdirectory
      */
     async getDirectoryHandle(name, options) {
-        // Only allow direct children (no path separators)
-        if (name.includes(path.sep) || name.includes('/')) {
-            throw new TypeError('Name is invalid');
-        }
+        // Only allow direct children (no path separators, no "." / "..")
+        assertValidName(name);
         const dirPath = path.join(this._path, name);
         const create = options?.create ?? false;
+        let stats;
         try {
-            const stats = await fs.stat(dirPath);
-            if (!stats.isDirectory()) {
-                throw new TypeError(`'${name}' is not a directory`);
+            stats = await fs.stat(dirPath);
+        }
+        catch (error) {
+            if (error.code !== 'ENOENT') {
+                throw error;
+            }
+            if (!create) {
+                throw new DOMException(`Directory '${name}' not found`, 'NotFoundError');
+            }
+            try {
+                // Create the directory if it doesn't exist
+                await fs.mkdir(dirPath, { recursive: false });
+            }
+            catch (mkdirError) {
+                // If another caller created it first, treat it as success
+                if (mkdirError.code !== 'EEXIST') {
+                    throw mkdirError;
+                }
+                const raceStats = await fs.stat(dirPath);
+                if (!raceStats.isDirectory()) {
+                    throw new DOMException(`'${name}' is not a directory`, 'TypeMismatchError');
+                }
             }
             return new FileSystemDirectoryHandle(name, dirPath);
         }
-        catch (error) {
-            if (create) {
-                try {
-                    // Create the directory if it doesn't exist
-                    await fs.mkdir(dirPath, { recursive: false });
-                }
-                catch (mkdirError) {
-                    // If another caller created it first, treat it as success
-                    if (mkdirError.code === 'EEXIST') {
-                        const stats = await fs.stat(dirPath);
-                        if (!stats.isDirectory()) {
-                            throw new TypeError(`'${name}' is not a directory`);
-                        }
-                    }
-                    else {
-                        throw mkdirError;
-                    }
-                }
-                return new FileSystemDirectoryHandle(name, dirPath);
-            }
-            if (error.code === 'ENOENT') {
-                throw new DOMException(`Directory '${name}' not found`, 'NotFoundError');
-            }
-            throw error;
+        // Checked outside the try/catch above so a wrong-kind entry reports
+        // TypeMismatchError instead of being swallowed by the ENOENT handling
+        // and reported as NotFoundError.
+        if (!stats.isDirectory()) {
+            throw new DOMException(`'${name}' is not a directory`, 'TypeMismatchError');
         }
+        return new FileSystemDirectoryHandle(name, dirPath);
     }
     /**
      * Removes an entry from the directory
      */
     async removeEntry(name, options) {
+        // Only allow direct children (no path separators, no "." / "..")
+        assertValidName(name);
         const entryPath = path.join(this._path, name);
         const recursive = options?.recursive ?? false;
+        let stats;
         try {
-            const stats = await fs.stat(entryPath);
-            if (stats.isDirectory()) {
-                if (recursive) {
-                    await fs.rm(entryPath, { recursive: true, force: false });
-                }
-                else {
-                    // Check if directory is empty
-                    const entries = await fs.readdir(entryPath);
-                    if (entries.length > 0) {
-                        throw new DOMException(`Directory '${name}' is not empty`, 'InvalidModificationError');
-                    }
-                    await fs.rmdir(entryPath);
-                }
-            }
-            else {
-                await fs.unlink(entryPath);
-            }
+            stats = await fs.stat(entryPath);
         }
         catch (error) {
             if (error.code === 'ENOENT') {
@@ -109,18 +101,27 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
             }
             throw error;
         }
+        await removeFileSystemEntry(entryPath, name, recursive, stats.isDirectory());
     }
     /**
      * Resolves a path relative to this directory
      */
     async resolve(possibleDescendant) {
         const descendantPath = possibleDescendant._path;
-        if (!descendantPath.startsWith(this._path)) {
-            return null;
-        }
         const relativePath = path.relative(this._path, descendantPath);
         if (relativePath === '') {
             return [];
+        }
+        // path.relative doesn't know about containment: if descendantPath isn't
+        // actually inside this._path, the result either escapes upward (starts
+        // with '..') or, on Windows, is a separate absolute path (different
+        // drive). A plain string-prefix check on the raw paths would wrongly
+        // treat a sibling like "foobar" as being inside "foo".
+        const isOutside = relativePath === '..' ||
+            relativePath.startsWith('..' + path.sep) ||
+            path.isAbsolute(relativePath);
+        if (isOutside) {
+            return null;
         }
         return relativePath.split(path.sep);
     }
@@ -130,6 +131,10 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
     async *keys() {
         const entries = await fs.readdir(this._path);
         for (const entry of entries) {
+            // Hide in-progress writable-stream swap files, matching real OPFS
+            // where they're never visible via the directory API.
+            if (isSwapFileName(entry))
+                continue;
             yield entry;
         }
     }
@@ -139,6 +144,8 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
     async *values() {
         const entries = await fs.readdir(this._path, { withFileTypes: true });
         for (const entry of entries) {
+            if (isSwapFileName(entry.name))
+                continue;
             const entryPath = path.join(this._path, entry.name);
             if (entry.isFile()) {
                 yield new FileSystemFileHandle(entry.name, entryPath);
@@ -154,6 +161,8 @@ export class FileSystemDirectoryHandle extends FileSystemHandle {
     async *entries() {
         const entries = await fs.readdir(this._path, { withFileTypes: true });
         for (const entry of entries) {
+            if (isSwapFileName(entry.name))
+                continue;
             const entryPath = path.join(this._path, entry.name);
             if (entry.isFile()) {
                 yield [entry.name, new FileSystemFileHandle(entry.name, entryPath)];

@@ -2,6 +2,40 @@ import * as path from 'path';
 import * as os from 'os';
 import * as fs from 'fs/promises';
 import { FileSystemDirectoryHandle } from './FileSystemDirectoryHandle.js';
+import { isSwapFileName } from './swapFile.js';
+
+/**
+ * Result of StorageManager.estimate(), mirroring navigator.storage.estimate().
+ */
+export interface StorageEstimate {
+  usage: number;
+  quota: number;
+}
+
+/**
+ * Recursively sums file sizes under a directory, matching what
+ * FileSystemDirectoryHandle's iteration methods consider "real" entries:
+ * in-progress writable-stream swap files are excluded, the same way
+ * they're hidden from keys()/values()/entries().
+ */
+async function computeDirectorySize(dirPath: string): Promise<number> {
+  let total = 0;
+  const entries = await fs.readdir(dirPath, { withFileTypes: true });
+
+  for (const entry of entries) {
+    if (isSwapFileName(entry.name)) continue;
+    const entryPath = path.join(dirPath, entry.name);
+
+    if (entry.isDirectory()) {
+      total += await computeDirectorySize(entryPath);
+    } else if (entry.isFile()) {
+      const stats = await fs.stat(entryPath);
+      total += stats.size;
+    }
+  }
+
+  return total;
+}
 
 /**
  * Storage Manager for accessing the origin private file system
@@ -20,7 +54,7 @@ export class StorageManager {
   async getDirectory(): Promise<FileSystemDirectoryHandle> {
     // Ensure the base directory exists
     await fs.mkdir(this._baseDir, { recursive: true });
-    
+
     return new FileSystemDirectoryHandle('', this._baseDir);
   }
 
@@ -37,6 +71,50 @@ export class StorageManager {
   getBaseDir(): string {
     return this._baseDir;
   }
+
+  /**
+   * Estimates storage usage and quota for this origin's storage, mirroring
+   * navigator.storage.estimate(). `usage` is the actual on-disk byte total
+   * under the storage root (a real measurement, not a browser-style
+   * estimate, since Node has no cheaper way to approximate it). `quota`
+   * approximates "how much this storage could grow to in total" as current
+   * usage plus the remaining free space on the underlying filesystem --
+   * this keeps the usage <= quota invariant real callers rely on. If the
+   * platform/filesystem doesn't support statfs, quota falls back to
+   * reporting usage (i.e. "no known headroom") rather than throwing.
+   */
+  async estimate(): Promise<StorageEstimate> {
+    await fs.mkdir(this._baseDir, { recursive: true });
+    const usage = await computeDirectorySize(this._baseDir);
+
+    let quota = usage;
+    try {
+      const stats = await fs.statfs(this._baseDir);
+      quota = usage + stats.bavail * stats.bsize;
+    } catch {
+      // statfs isn't supported on every platform/filesystem.
+    }
+
+    return { usage, quota };
+  }
+
+  /**
+   * Requests that storage not be cleared without the user's permission.
+   * Node has no storage-eviction-under-pressure concept the way browsers
+   * do, so storage here is always effectively persisted -- this always
+   * resolves true, matching what a browser reports once persistence has
+   * already been granted.
+   */
+  async persist(): Promise<boolean> {
+    return true;
+  }
+
+  /**
+   * Node has no eviction concept, so storage is always persisted.
+   */
+  async persisted(): Promise<boolean> {
+    return true;
+  }
 }
 
 /**
@@ -48,7 +126,10 @@ const storageManager = new StorageManager();
  * Navigator-like API for accessing storage
  */
 export const storage = {
-  getDirectory: () => storageManager.getDirectory()
+  getDirectory: () => storageManager.getDirectory(),
+  estimate: () => storageManager.estimate(),
+  persist: () => storageManager.persist(),
+  persisted: () => storageManager.persisted()
 };
 
 /**

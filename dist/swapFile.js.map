@@ -1,0 +1,1 @@
+{"version":3,"file":"swapFile.js","sourceRoot":"","sources":["../src/swapFile.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;GAeG;AACH,MAAM,CAAC,MAAM,gBAAgB,GAAG,SAAS,CAAC;AAE1C,MAAM,UAAU,WAAW,CAAC,QAAgB;IAC1C,OAAO,QAAQ,GAAG,gBAAgB,CAAC;AACrC,CAAC;AAED,MAAM,UAAU,cAAc,CAAC,IAAY;IACzC,OAAO,IAAI,CAAC,QAAQ,CAAC,gBAAgB,CAAC,CAAC;AACzC,CAAC"}
