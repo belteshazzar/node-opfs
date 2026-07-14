@@ -106,6 +106,24 @@ with a trailing separator (`this._path + path.sep`).
 > `getFileHandle(..., { create: true })` always creating a 0-byte file
 > first, so it wasn't a locking-specific concern, but is worth knowing if
 > you construct a `FileSystemFileHandle` by other means.
+>
+> **Follow-up (beyond spec):** `src/FileLock.ts` was upgraded from an
+> in-memory `Set<string>` to a real OS advisory lock (`flock(2)`/
+> `LockFileEx` via the `fs-ext` dependency), taken on the file itself.
+> This is *not* a spec compliance fix — the spec's lock only needs to hold
+> within a single browsing context/agent, which the original `Set` already
+> satisfied. It's an intentional over-delivery for this implementation's
+> specific deployment target: multiple independent Node.js processes on the
+> same host sharing one `.node-opfs` directory, where an in-memory `Set` in
+> process A is invisible to process B. `acquireFileLock` now opens a
+> dedicated fd on the real file and calls `flockSync(fd, 'exnb')`
+> (non-blocking exclusive); `releaseFileLock` unlocks and closes it. Same
+> caveat as any advisory lock: it only excludes other processes that also
+> flock the file (i.e. other users of this library, or tools built on
+> `flock(1)`/`fcntl`) — a process writing to the path directly (e.g. a
+> plain `fs.writeFile` or a text editor) is not blocked. As a side benefit,
+> the OS releases the lock automatically if a process holding it crashes or
+> is killed, which the old `Set`-based version could not do.
 
 The spec gives every OPFS file an implicit readwrite lock: at most one
 `FileSystemWritableFileStream` **or** one `FileSystemSyncAccessHandle` may be

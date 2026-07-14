@@ -130,11 +130,10 @@ export abstract class FileSystemHandle {
     // matches this handle once it closes. Reject the move instead, the
     // same way a second writer would be rejected.
     const isFile = this.kind === 'file';
-    if (isFile) {
-      acquireFileLock(this._path, this._name);
-    }
-
     try {
+      if (isFile) {
+        acquireFileLock(this._path, this._name);
+      }
       await fs.rename(this._path, newPath);
     } catch (error: any) {
       if (error.code === 'ENOENT') {

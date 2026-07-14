@@ -1,5 +1,7 @@
 /**
- * Acquires the readwrite lock for a file, throwing if it's already held.
+ * Acquires the readwrite lock for a file, throwing if it's already held --
+ * by this process or any other process on the host with the file open via
+ * this library.
  */
 export declare function acquireFileLock(filePath: string, label?: string): void;
 /**

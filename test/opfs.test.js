@@ -1414,6 +1414,28 @@ test('FileSystemHandle.move() throws NotFoundError if the entry no longer exists
   );
 });
 
+test('createWritable() throws NotFoundError if the entry no longer exists', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('writable-ghost.txt', { create: true });
+  await root.removeEntry('writable-ghost.txt');
+
+  await assert.rejects(
+    async () => await fileHandle.createWritable(),
+    { name: 'NotFoundError' }
+  );
+});
+
+test('createSyncAccessHandle() throws NotFoundError if the entry no longer exists', async () => {
+  const root = await storage.getDirectory();
+  const fileHandle = await root.getFileHandle('sync-ghost.txt', { create: true });
+  await root.removeEntry('sync-ghost.txt');
+
+  await assert.rejects(
+    async () => await fileHandle.createSyncAccessHandle(),
+    { name: 'NotFoundError' }
+  );
+});
+
 test('FileSystemHandle.move() rejects while the file has an open writable stream, and succeeds once closed', async () => {
   const root = await storage.getDirectory();
   const fileHandle = await root.getFileHandle('move-while-locked.txt', { create: true });

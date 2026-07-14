@@ -17,6 +17,8 @@ A Node.js implementation of the Origin Private File System (OPFS) API that provi
 npm install node-opfs
 ```
 
+This pulls in [`fs-ext`](https://www.npmjs.com/package/fs-ext), a native addon used to take real OS-level file locks (see [File Locking](#file-locking) below). It compiles via `node-gyp` at install time, so a C++ toolchain (and Python) must be available on machines without a prebuilt binary for their platform/Node version.
+
 ## Quick Start
 
 ```javascript
@@ -427,6 +429,20 @@ const root = await storage.getDirectory();
 ```
 
 The default `~/.node-opfs` location is best treated as a convenience for quick scripts and testing, not as something multiple independent applications should share.
+
+## File Locking
+
+Per spec, at most one `FileSystemWritableFileStream` or `FileSystemSyncAccessHandle` may be open on a given file at a time; a second attempt rejects with `NoModificationAllowedError`. In a browser this only has to hold within one JS runtime. Since this library is meant to be used by separate Node.js processes/apps that may share the same storage directory, the lock is a real OS advisory lock (`flock(2)` on POSIX, `LockFileEx` on Windows, via [`fs-ext`](https://www.npmjs.com/package/fs-ext)) taken on the file itself — so it's enforced across processes on the same host, not just within one.
+
+```javascript
+// Process A
+const handle = await fileHandle.createSyncAccessHandle(); // acquires the lock
+
+// Process B, same file, while A still holds it
+await fileHandle.createSyncAccessHandle(); // throws NoModificationAllowedError
+```
+
+The lock is released when `close()` is called, and automatically by the OS if the holding process exits or crashes without closing it. Being an *advisory* lock, it only excludes other processes that also check it via `flock`/`fcntl` (i.e. other users of this library, or tools like the `flock(1)` command) — it does not prevent a process that writes to the path directly (e.g. a plain `fs.writeFile()` or a text editor) from doing so concurrently.
 
 ## Browser Compatibility
 

@@ -37,8 +37,19 @@ export class FileSystemFileHandle extends FileSystemHandle {
     async createWritable(options) {
         const keepExistingData = options?.keepExistingData ?? false;
         // Only one writable stream or sync access handle may be open on a file
-        // at a time, matching the browser's implicit readwrite lock.
-        acquireFileLock(this._path, this.name);
+        // at a time, matching the browser's implicit readwrite lock. Acquiring
+        // it opens (and flocks) the real file, so an entry removed out from
+        // under this handle since it was created now surfaces as NotFoundError
+        // here instead of silently resurrecting the file when the stream closes.
+        try {
+            acquireFileLock(this._path, this.name);
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                throw new DOMException(`'${this.name}' not found`, 'NotFoundError');
+            }
+            throw error;
+        }
         const swapPath = swapPathFor(this._path);
         try {
             let fd;
@@ -68,14 +79,27 @@ export class FileSystemFileHandle extends FileSystemHandle {
      */
     async createSyncAccessHandle() {
         // Only one writable stream or sync access handle may be open on a file
-        // at a time, matching the browser's implicit readwrite lock.
-        acquireFileLock(this._path, this.name);
+        // at a time, matching the browser's implicit readwrite lock. Acquiring
+        // it opens (and flocks) the real file, so an entry removed out from
+        // under this handle since it was created surfaces as NotFoundError here.
+        try {
+            acquireFileLock(this._path, this.name);
+        }
+        catch (error) {
+            if (error.code === 'ENOENT') {
+                throw new DOMException(`'${this.name}' not found`, 'NotFoundError');
+            }
+            throw error;
+        }
         try {
             const fd = await fs.open(this._path, 'r+');
             return new FileSystemSyncAccessHandle(fd, this._path);
         }
         catch (error) {
             releaseFileLock(this._path);
+            if (error.code === 'ENOENT') {
+                throw new DOMException(`'${this.name}' not found`, 'NotFoundError');
+            }
             throw error;
         }
     }

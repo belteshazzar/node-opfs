@@ -1,1 +1,1 @@
-{"version":3,"file":"FileLock.d.ts","sourceRoot":"","sources":["../src/FileLock.ts"],"names":[],"mappings":"AASA;;GAEG;AACH,wBAAgB,eAAe,CAAC,QAAQ,EAAE,MAAM,EAAE,KAAK,GAAE,MAAiB,GAAG,IAAI,CAQhF;AAED;;;GAGG;AACH,wBAAgB,eAAe,CAAC,QAAQ,EAAE,MAAM,GAAG,IAAI,CAEtD"}
+{"version":3,"file":"FileLock.d.ts","sourceRoot":"","sources":["../src/FileLock.ts"],"names":[],"mappings":"AAsBA;;;;GAIG;AACH,wBAAgB,eAAe,CAAC,QAAQ,EAAE,MAAM,EAAE,KAAK,GAAE,MAAiB,GAAG,IAAI,CAehF;AAED;;;GAGG;AACH,wBAAgB,eAAe,CAAC,QAAQ,EAAE,MAAM,GAAG,IAAI,CAWtD"}
